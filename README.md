@@ -41,7 +41,7 @@
   - 确认 QEMU 和 GCC 工具链正常工作的命令：
 
     ```
-    Copy codegcc -m32 --version  # 检查 GCC 是否支持 32 位编译
+    codegcc -m32 --version  # 检查 GCC 是否支持 32 位编译
     qemu-system-i386 --version  # 检查 QEMU 版本
     ```
 
