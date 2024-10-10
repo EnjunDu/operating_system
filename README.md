@@ -41,7 +41,7 @@
   - 确认 QEMU 和 GCC 工具链正常工作的命令：
 
     ```
-    bashCopy codegcc -m32 --version  # 检查 GCC 是否支持 32 位编译
+    Copy codegcc -m32 --version  # 检查 GCC 是否支持 32 位编译
     qemu-system-i386 --version  # 检查 QEMU 版本
     ```
 
@@ -62,10 +62,6 @@
 - 如果你能够在 RISC-V 架构上完成实验，可以额外获得 10% 分数。可以通过以下命令在 RISC-V 模拟器中启动 xv6：
 
   ```
-  bash
-  
-  
-  Copy code
   qemu-system-riscv64 -kernel xv6/kernel  # 启动 RISC-V 模拟器
   ```
 
