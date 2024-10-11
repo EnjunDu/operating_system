@@ -15,14 +15,14 @@
 
 输入`objdump -i`检查是否支持64位:
 ```
-ckti@CKubuntu:~$ objdump -i
+user@Lab:~$ objdump -i
 BFD header file version (GNU Binutils for Ubuntu) 2.38
 elf64-x86-64
 ```
 
 输入`gcc -m32 -print-libgcc-file-name `查看32位gcc库文件路径:
 ```
-ckti@CKubuntu:~$ gcc -m32 -print-libgcc-file-name 
+user:~$ gcc -m32 -print-libgcc-file-name 
 /usr/lib/gcc/x86_64-linux-gnu/11/32/libgcc.a
 ```
 
@@ -34,7 +34,7 @@ ckti@CKubuntu:~$ gcc -m32 -print-libgcc-file-name
 
 输入`qemu-system-i386 --version`查看qemu版本:
 ```
-ckti@CKubuntu:~$ qemu-system-i386 --version
+user@Lab:~$ qemu-system-i386 --version
 QEMU emulator version 6.2.0 (Debian 1:6.2+dfsg-2ubuntu6.22)
 Copyright (c) 2003-2021 Fabrice Bellard and the QEMU Project developers
 ```
