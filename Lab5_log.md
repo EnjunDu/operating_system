@@ -225,29 +225,28 @@ if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz, curproc->stackbase)) == 0)
 在`trap.c` 中,中处理页面错误，检测是否是栈溢出，并分配新的栈页：
 ```
 // 新增触发页错误（Page Fault）的情况
-  case T_PGFLT:
-  // 条件检查：确保页面错误地址在用户栈范围内。
-  if (rcr2() < USERTOP && rcr2() >= myproc()->stackbase - PGSIZE) {
-
-    //打印调试信息：页面错误地址和当前栈位置
-    cprintf("page fault at %x\n", rcr2());
-    cprintf("current stack position: %x\n", myproc()->stackbase);
-
-    // 分配新的用户栈页面
-    // 尝试分配新的栈页
-    if (allocuvm(myproc()->pgdir, myproc()->stackbase - PGSIZE, myproc()->stackbase) == 0) {
-      myproc()->killed = 1; // 如果分配失败，标记进程为被杀死。
-    } 
-    else{
-      // 更新栈基地址并打印。
-      myproc()->stackbase -= PGSIZE; 
-      cprintf("allocated new stack page at %x\n", myproc()->stackbase);
-    }
-    return;
-    } else {
+case T_PGFLT:
+  
+  if (rcr2() < USERTOP)// 条件检查：确保页面错误地址在用户栈范围内。
+  {
+    cprintf("page error %x ",rcr2());
+    cprintf("stack pos : %x\n", myproc()->stackbase);
+    // 为用户栈分配新的页面
+    if ((myproc()->stackbase = allocuvm(myproc()->pgdir, myproc()->stackbase - 1 * PGSIZE,
+    myproc()->stackbase)) == 0)
+    {
       myproc()->killed = 1;
-      break;
     }
+    myproc()->stackbase-=PGSIZE; // 更新用户栈的栈顶位置
+    cprintf("create a new page %x\n", myproc()->stackbase);
+      //clearpteu(myproc()->pgdir, (char *) (myproc()->stackbase - PGSIZE));
+    return;
+  }
+  else
+  {
+     myproc()->killed = 1;
+    break;
+  }
 ```
 
 ## 编写测试程序`testcase.c`
@@ -256,6 +255,7 @@ if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz, curproc->stackbase)) == 0)
 #include "types.h"
 #include "stat.h"
 #include "user.h"
+#include "memlayout.h"
 
 // 获取当前栈指针
 uint get_stack_pointer() {
@@ -373,4 +373,81 @@ int main() {
 在`Makefile`中添加编译`testcase.c`的命令：
 ```
   _testcase\
+```
+
+# 进行实验
+
+运行`make qemu`启动QEMU，并在QEMU中运行测试程序：
+```
+$ testcase
+```
+一共有五个测试，具体输出如下：
+
+## 测试1 测试栈位置
+输出当前栈指针，堆结束地址，判断栈是否位于堆之上，可以发现栈指针位于堆之上
+```
+=== Test 1: Stack Position ===
+Current stack pointer: 0x7FFFEFB0
+Heap end: 0x2000
+Test passed: Stack is above heap.
+```
+
+## 测试2 测试堆和栈分离
+输出堆范围，栈指针，判断栈是否位于堆之上，可以发现栈指针位于堆之上
+```
+=== Test 2: Heap and Stack Separation ===
+Heap range: 0x2000 - 0xC000
+Stack pointer: 0x7FFFEFA0
+Test passed: Stack is above heap after sbrk.
+```
+
+## 测试3 测试栈增长
+递归调用，输出递归深度和栈地址，可以发现栈地址逐渐增长
+```
+=== Test 3: Stack Growth ===
+Testing stack growth with recursion...
+Recursion depth: 1, buffer address: 0x7FFFE3A0
+Recursion depth: 2, buffer address: 0x7FFFE7A0
+Recursion depth: 3, buffer address: 0x7FFFEBA0
+```
+## 测试4 深度递归调用以测试更大规模的栈增长
+递归调用，输出递归深度和栈地址，可以发现栈地址逐渐增长，并且当深度达到一定值时，会触发页错误，创建新的页，由此不断重复，直到到达设定的递归深度
+```
+=== Test 4: Deep Stack Growth ===
+Starting deep recursion test...
+Recursion depth: 1, buffer address: 0x7FFFBFA0
+Recursion depth: 2, buffer address: 0x7FFFCFA0
+Recursion depth: 3, buffer address: 0x7FFFDFA0
+...
+Recursion depth: 48, buffer address: 0x7FFD0DC0
+page error 7ffcbda0 stack pos : 7ffcc000
+create a new page 7ffcb000
+Recursion depth: 49, buffer address: 0x7FFCBDA0
+Recursion depth: 50, buffer address: 0x7FFCCDA
+ecursion depth: 51, buffer address: 0x7FFCDDA0
+page error 7ffcad80 stack pos : 7ffcb000
+create a new page 7ffca000
+page error 7ffc9d80 stack pos : 7ffca000
+create a new page 7ffc9000
+page error 7ffc8d80 stack pos : 7ffc9000
+create a new page 7ffc8000
+Recursion depth: 52, buffer address: 0x7FFC8D80
+...
+...
+page error 7ff37760 stack pos : 7ff38000
+create a new page 7ff37000
+page error 7ff36760 stack pos : 7ff37000
+create a new page 7ff36000
+page error 7ff35760 stack pos : 7ff36000
+create a new page 7ff35000
+Recursion depth: 199, buffer address: 0x7FF35760
+Recursion depth: 200, buffer address: 0x7FF36760
+```
+## 测试5 测试堆与栈的冲突
+强制堆增长，接近栈区域，输出栈地址，可以发现栈地址逐渐增长，直到触发页错误，创建新的页，从而实现堆与栈的冲突
+```
+=== Test 5: Stack-Heap Collision ===
+allocuvm out of memory
+Allocated stack buffer at: 0x7FFFEBA0
+Test completed.
 ```
