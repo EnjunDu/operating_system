@@ -1,0 +1,3 @@
+[submodule "xv6-public_first_edition"]
+	path = xv6-public_first_edition
+	url = https://github.com/EnjunDu/xv6-public_first_edition.git
