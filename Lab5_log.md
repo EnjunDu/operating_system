@@ -7,7 +7,7 @@
 操作系统:Ubuntu 22.04.4 LTS (GNU/Linux 6.8.0-40-generic x86_64)
 
 小型操作系统内核:xv6
-s
+
 ## gcc配置
 
 输入`sudo apt update`更新软件包列表
@@ -92,27 +92,47 @@ $
 
 ## xv6的内存布局
 
-## `exec.c`的功能：
-这段代码是一个典型的操作系统内核中的`exec`函数的实现,用于加载并执行一个新的程序。内存布局的实现主要涉及以下几个步骤: 
+在xv6中,内存布局分为内核空间和用户空间,
 
-1. 查找并锁定可执行文件:
-   - 调用`namei(path)`查找文件路径对应的inode。
-   - 如果找不到文件,调用`end_op()`结束操作并返回错误。
-   - 调用`ilock(ip)`锁定该inode。
+内核位于内存空间的高地址部分,从一个固定点 (KERNBASE,通常是 0x80000000) 开始。包含内核代码和数据、I/O 内存映射、内核栈、物理内存映射
 
-2. 检查ELF头:
-   - 调用`readi(ip, (char*)&elf, 0, sizeof(elf))`读取文件的ELF头。
-   - 如果读取失败或魔数不匹配,跳转到错误处理部分。
+用户空间位于地址空间的低地址部分(低于 KERNBASE),主要包括文本段、数据段、堆段和栈段。其中栈段由中间的某个地址开始向上增长,本次实验的目的就是讲栈的分配方式由从下往上修改为从上往下。具体的内存分布见下图:
 
-3. 设置内核虚拟内存:
-   - 调用`setupkvm()`设置内核虚拟内存。
-   - 如果设置失败,跳转到错误处理部分。
+## 相关函数
 
-4. 加载程序到内存:
-   - 初始化`sz`为0。
-   - 遍历程序头表(Program Header Table),读取每个程序段(Segment)并加载到内存中。
+以下是与xv6内存布局和管理相关的文件及其简要功能描述:
 
-在对栈的分配上,其通过调用`allocuvm`进行分配内存
+### 1. `vm.c`
+负责虚拟内存管理,包括设置内核页表、分配和释放用户内存、复制进程内存等。关键函数包括 `setupkvm()`、`allocuvm()`、`deallocuvm()` 和 `copyuvm()`。
+
+### 2. `proc.c`
+管理进程状态,包括创建新进程、扩展内存(`growproc()`)、执行新程序(`exec()`)等,使用 `copyuvm()` 复制父进程的内存布局。
+
+### 3. `trap.c`
+处理异常和中断,包括页面错误(Page Fault)。在 `trap()` 函数中处理用户栈不足时的错误,调用 `allocuvm()` 分配新页面。
+
+### 4. `exec.c`
+加载可执行文件和初始化进程的内存布局,使用 `exec()` 加载 ELF 文件,分配代码段、数据段和用户栈。
+
+### 5. `syscall.c`
+处理系统调用,调用相应的内存管理功能,如 `fork`、`exec`、`wait` 等,负责在用户空间和内核空间之间切换。
+
+### 6. `memlayout.h`
+定义内存布局的常量,包括内核空间和用户空间的起始和结束地址,如 `KERNBASE`、`PHYSTOP` 和 `USERTOP`。
+
+### 7. `mmu.h`
+定义分页机制的宏和结构,描述页表项格式、页大小等,如 `PGSIZE` 和各种页表项标志(PTE)。
+
+### 8. `kalloc.c`
+实现物理内存分配,提供 `kalloc()` 和 `kfree()` 函数,负责从物理内存中分配和释放页面。
+
+### 9. `trapasm.S`
+汇编代码,处理从用户态进入内核态时的上下文切换,设置陷阱帧并跳转到 `trap()` 函数。
+
+### 10. `kernel.ld`
+链接脚本,定义内核的加载地址及各部分的内存布局,确保内核和用户进程的内存正确映射。
+
+这些文件和函数共同实现了xv6的内存管理和布局,确保系统在运行时能够有效地分配和使用内存。
 
 # 代码修改
 
@@ -151,7 +171,7 @@ $
 
 ## 调整`proc`结构修改 `proc->sz`的管理
 
-当前 `proc->sz` 跟踪整个用户地址空间的大小，包括代码段、堆和栈。在修改后，`proc->sz` 只用于跟踪代码段和堆的大小，需要额外的字段来跟踪栈的起始位置。
+当前 `proc->sz` 跟踪整个用户地址空间的大小,包括代码段、堆和栈。在修改后,`proc->sz` 只用于跟踪代码段和堆的大小,需要额外的字段来跟踪栈的起始位置。
 故在`proc.h`中对proc结构设置新的结构项:
 
 ```
@@ -174,6 +194,13 @@ struct proc {
 };
 ```
 
+## 修改内存管理的相关函数
+
+在`proc.c`中,修改`fork`函数以传递 `stackbase` 参数给 `copyuvm` 函数。
+
+```
+if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz, curproc->stackbase)) == 0)
+```
 
 在`vm.c`中修改 `copyuvm` 函数,以确保在 fork 时正确地拷贝栈。:
 ```
@@ -202,19 +229,11 @@ copyuvm(pde_t *pgdir, uint sz, uint stackbase)
 }
 ```
 
-## 修改内存管理的相关函数
-
-在`proc.c`中，修改`fork`函数以传递 `stackbase` 参数给 `copyuvm` 函数。
-
-```
-if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz, curproc->stackbase)) == 0)
-```
-
 ## 实现栈增长后的处理
 
-在`trap.c` 中,中处理页面错误，检测是否是栈溢出，并分配新的栈页:
+在`trap.c` 中,中处理页面错误,检测是否是栈溢出,并分配新的栈页:
 ```
-// 新增触发页错误（Page Fault）的情况
+// 新增触发页错误(Page Fault)的情况
 case T_PGFLT:
   
   if (rcr2() < USERTOP)// 条件检查:确保页面错误地址在用户栈范围内。
@@ -238,6 +257,8 @@ case T_PGFLT:
     break;
   }
 ```
+
+在`syscall.c`中修改所有引用sz的地方,以反映新的栈位置。
 
 # 进行实验
 
@@ -278,8 +299,8 @@ int main(int argc, char *argv[]) {
 ```
 
 ### 测试栈的增长以及缺页分配
-编写如下程序：
-其中，get_stack_pointer用于获取栈指针，recursion函数用于递归调用，test_stack_growth函数用于测试栈的增长。对于每次递归调用，输出当前栈指针和分配的buffer地址。
+编写如下程序:
+其中,`get_stack_pointer`用于获取栈指针,`recursion`函数用于递归调用,`test_stack_growth`函数用于测试栈的增长。对于每次递归调用,输出当前栈指针。
 ```
 // 获取当前栈指针
 uint get_stack_pointer() {
@@ -290,7 +311,7 @@ uint get_stack_pointer() {
 
 // 深度递归调用以测试更大规模的栈增长
 void recursion(int depth) {
-    char buffer[4096];  // 分配4KB的空间，确保每次递归占用整页
+    char buffer[4096];  // 分配4KB的空间,确保每次递归占用整页
     memset(buffer, 1 , 4096); // 进行操作避免被优化掉
     uint sp = get_stack_pointer();
     printf(1, "Recursion depth: %d, stack address: 0x%x\n", depth , sp );
@@ -306,14 +327,14 @@ void test_stack_growth() {
     printf(1, "\n=== Test: Stack Growth ===\n");
     printf(1, "Starting recursion test...\n");
 
-    recursion(1);  // 初始递归调用，测试栈增长
+    recursion(1);  // 初始递归调用,测试栈增长
 
     printf(1, "Stack recursion test completed.\n");
 }
 ```
 
 ## 测试堆与栈的冲突
-在测试栈增长的基础上，添加test_stack_heap_collision函数，通过分配大量堆内存，测试堆与栈的冲突。
+在测试栈增长的基础上,添加test_stack_heap_collision函数,通过分配大量堆内存,测试堆与栈的冲突。
 ```
 // 测试堆与栈的冲突
 void test_stack_heap_collision() {
@@ -324,7 +345,7 @@ void test_stack_heap_collision() {
     *p = 1;
 
     printf(1, "Making recursions .\n");
-    recursion(1);  // 初始递归调用，测试栈增长
+    recursion(1);  // 初始递归调用,测试栈增长
     printf(1, "Stack recursion test completed.\n");
 }
 ```
@@ -342,7 +363,7 @@ UPROGS=\
 ```
 
 
-运行`make qemu`启动QEMU，并在QEMU中运行测试程序,观察输出，得出结论:
+运行`make qemu`启动QEMU,并在QEMU中运行测试程序,观察输出,得出结论:
 ```
 $ testcase
 ```
@@ -374,12 +395,11 @@ create a new page 7ff98000
 Recursion depth: 100, stack address: 0x7FF98B70,buffer address: 0x7FF98B70
 Stack recursion test completed
 ```
-从输出中可以看出，随着递归深度的增加，由于栈空间不足，系统会不断分配新的页，并且对于每次递归，系统都会输出栈帧地址和站上的数据，我们可以看到栈地址逐渐从高地址向低地址移动，说明我们的栈是向下增长的。
+从输出中可以看出,随着递归深度的增加,由于栈空间不足,系统会不断分配新的页,并且对于每次递归,系统都会输出栈帧地址和站上的数据,我们可以看到栈地址逐渐从高地址向低地址移动,说明我们的栈是向下增长的。
 
 ### 测试堆与栈的冲突
 
 ```
-=== Test: Stack-Heap Collision ===
 
 === Test: Stack-Heap Collision ===
 Starting stack-heap collision test...
@@ -414,4 +434,4 @@ The stack has grown into the heap space.
 create a new page fffff000
 stack is allocated in wrong place, End the process!
 ```
-从输出中可以看出，当递归深度达到28时，此时栈已经进入堆空间。由于我们的程序在出现这种情况时选择重新分配栈空间，而在此时，由于无空间可分，最终栈被分入错误的地址，导致程序崩溃。
+从输出中可以看出,当递归深度达到28时,此时栈已经进入堆空间。由于我们的程序在出现这种情况时选择重新分配栈空间,而在此时,由于无空间可分,最终栈被分入错误的地址,导致程序崩溃。
