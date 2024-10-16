@@ -7,7 +7,7 @@
 操作系统:Ubuntu 22.04.4 LTS (GNU/Linux 6.8.0-40-generic x86_64)
 
 小型操作系统内核:xv6
-
+s
 ## gcc配置
 
 输入`sudo apt update`更新软件包列表
@@ -88,9 +88,11 @@ init: starting sh
 $
 ```
 
-# 修改内存布局
+# xv6功能分析
 
-## 阅读exec.c代码:
+## xv6的内存布局
+
+## `exec.c`的功能：
 这段代码是一个典型的操作系统内核中的`exec`函数的实现,用于加载并执行一个新的程序。内存布局的实现主要涉及以下几个步骤: 
 
 1. 查找并锁定可执行文件:
@@ -112,11 +114,13 @@ $
 
 在对栈的分配上,其通过调用`allocuvm`进行分配内存
 
+# 代码修改
+
 ## 具体步骤:
 
 1. 重新定义用户地址空间布局。
-2. 修改 exec.c 以在高地址处分配栈。
-3. 调整 proc 结构,以正确跟踪用户栈和堆的边界。
+2. 修改 `exec.c` 以在高地址处分配栈。
+3. 调整 `proc` 结构,以正确跟踪用户栈和堆的边界。
 4. 修改与内存管理相关的函数,确保它们能正确处理栈和堆的分配及地址验证。
 5. 实现栈增长的处理
 
@@ -129,25 +133,23 @@ $
 ```
 在这个空间内修改栈的位置。
 
-## 修改exec.c
+## 修改`exec.c`中的栈分配逻辑
 
 `exec.c` 负责加载用户程序并初始化用户地址空间。它使用 `allocuvm()` 为程序分配内存,加载代码段和数据段,并为栈分配一页内存。以下是栈分配的步骤
 
-## 修改栈分配逻辑:
-
 在`exec.c` 中,找到分配用户栈的代码,将栈分配到代码和堆的末尾,并分配两页(`2*PGSIZE`)大小的栈空间;
-修改栈的位置到 `KERNBASE - 2*PGSIZE` 开始
+修改栈的位置到 `KERNBASE - *PGSIZE` 开始
 
 ```
 // Allocate user stack at the top of the address space.
-  uint stackbase = USERTOP - 2*PGSIZE;
+  uint stackbase = USERTOP - *PGSIZE;
   if((allocuvm(pgdir, stackbase, USERTOP)) == 0)
     goto bad;
   clearpteu(pgdir, (char*)(stackbase));
   sp = USERTOP;
 ```
 
-## 修改 `proc->sz`的管理
+## 调整`proc`结构修改 `proc->sz`的管理
 
 当前 `proc->sz` 跟踪整个用户地址空间的大小，包括代码段、堆和栈。在修改后，`proc->sz` 只用于跟踪代码段和堆的大小，需要额外的字段来跟踪栈的起始位置。
 故在`proc.h`中对proc结构设置新的结构项:
@@ -172,21 +174,6 @@ struct proc {
 };
 ```
 
-## 修改`exec.c`中的地址分配，以在高地址处分配栈。
-并在`exec.c`中设置跟踪栈的基地址
-```
-// Allocate user stack at the top of the address space.
-  uint stackbase = USERTOP - 2*PGSIZE;
-```
-在`exec.c`中修改栈的分配方式
-```
-// Allocate user stack at the top of the address space.
-  stackbase = USERTOP - 2*PGSIZE;
-  if((allocuvm(pgdir, stackbase, USERTOP)) == 0)
-    goto bad;
-  clearpteu(pgdir, (char*)(stackbase));
-  sp = USERTOP;
-```
 
 在`vm.c`中修改 `copyuvm` 函数,以确保在 fork 时正确地拷贝栈。:
 ```
@@ -194,7 +181,7 @@ copyuvm(pde_t *pgdir, uint sz, uint stackbase)
 {
    ...
    // Copy the stack
-  for(i = stackbase; i < USERTOP; i += PGSIZE){
+  for(i = USERTOP - PGSIZE; i > stackbase  i -= PGSIZE){
     if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
       panic("copyuvm: pte should exist");
     if(!(*pte & PTE_P))
@@ -215,13 +202,15 @@ copyuvm(pde_t *pgdir, uint sz, uint stackbase)
 }
 ```
 
-## 进行其他关于sz修改后的相关修改
+## 修改内存管理的相关函数
 
 在`proc.c`中，修改`fork`函数以传递 `stackbase` 参数给 `copyuvm` 函数。
 
 ```
 if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz, curproc->stackbase)) == 0)
 ```
+
+## 实现栈增长后的处理
 
 在`trap.c` 中,中处理页面错误，检测是否是栈溢出，并分配新的栈页:
 ```
@@ -250,14 +239,48 @@ case T_PGFLT:
   }
 ```
 
+# 进行实验
+
 ## 编写测试程序`testcase.c`
+
+### 主要结构
 
 ```
 #include "types.h"
 #include "stat.h"
 #include "user.h"
-#include "memlayout.h"
 
+// 获取当前栈指针
+uint get_stack_pointer() {
+    ...
+}
+
+// 深度递归调用以测试更大规模的栈增长
+void recursion(int depth) {
+    ...
+}
+
+// 测试深度递归引发栈增长
+void test_stack_growth() {
+    ...
+}
+
+// 测试堆与栈的冲突
+void test_stack_heap_collision() {
+    ...
+}
+
+int main(int argc, char *argv[]) {
+    test_stack_growth();
+    test_stack_heap_collision();
+    exit();
+}
+```
+
+### 测试栈的增长以及缺页分配
+编写如下程序：
+其中，get_stack_pointer用于获取栈指针，recursion函数用于递归调用，test_stack_growth函数用于测试栈的增长。对于每次递归调用，输出当前栈指针和分配的buffer地址。
+```
 // 获取当前栈指针
 uint get_stack_pointer() {
     uint sp;
@@ -265,190 +288,130 @@ uint get_stack_pointer() {
     return sp;
 }
 
-// 测试栈是否位于堆之上
-void test_stack_position() {
-    printf(1, "\n=== Test 1: Stack Position ===\n");
-    uint sp = get_stack_pointer();
-    uint heap_end = (uint)sbrk(0);
-
-    printf(1, "Current stack pointer: 0x%x\n", sp);
-    printf(1, "Heap end: 0x%x\n", heap_end);
-
-    if (sp > heap_end) {
-        printf(1, "Test passed: Stack is above heap.\n");
-    } else {
-        printf(1, "Test failed: Stack is not correctly positioned.\n");
-    }
-}
-
-// 测试堆和栈是否分离
-void test_heap_stack_separation() {
-    printf(1, "\n=== Test 2: Heap and Stack Separation ===\n");
-
-    uint heap_start = (uint)sbrk(0);
-    sbrk(4096 * 10);  // 增加10页堆
-    uint heap_end = (uint)sbrk(0);
-    uint sp = get_stack_pointer();
-
-    printf(1, "Heap range: 0x%x - 0x%x\n", heap_start, heap_end);
-    printf(1, "Stack pointer: 0x%x\n", sp);
-
-    if (sp > heap_end) {
-        printf(1, "Test passed: Stack is above heap after sbrk.\n");
-    } else {
-        printf(1, "Test failed: Stack and heap overlap.\n");
-    }
-}
-
-// 递归调用以强制栈增长
-void recursive_call(int depth) {
-    char buffer[1024];  // 在栈上分配空间，逐步增长栈
-    printf(1, "Recursion depth: %d, buffer address: 0x%x\n", depth, buffer);
-
-    // 递归调用，强制栈增长
-    if (depth < 100) {
-        recursive_call(depth + 1);
-    }
-}
-
-// 测试栈增长
-void test_stack_growth() {
-    printf(1, "\n=== Test 3: Stack Growth ===\n");
-    printf(1, "Testing stack growth with recursion...\n");
-    recursive_call(1);  // 初始调用
-
-    printf(1, "Test completed.\n");
-}
-
 // 深度递归调用以测试更大规模的栈增长
-void deep_recursion(int depth) {
+void recursion(int depth) {
     char buffer[4096];  // 分配4KB的空间，确保每次递归占用整页
-    printf(1, "Recursion depth: %d, buffer address: 0x%x\n", depth, buffer);
+    memset(buffer, 1 , 4096); // 进行操作避免被优化掉
+    uint sp = get_stack_pointer();
+    printf(1, "Recursion depth: %d, stack address: 0x%x\n", depth , sp );
 
     // 在深度达到一定值之前递归
-    if (depth < 200) {
-        deep_recursion(depth + 1);
+    if (depth < 100) {
+        recursion(depth + 1);
     }
 }
 
 // 测试深度递归引发栈增长
-void test_deep_stack_growth() {
-    printf(1, "\n=== Test 4: Deep Stack Growth ===\n");
-    printf(1, "Starting deep recursion test...\n");
+void test_stack_growth() {
+    printf(1, "\n=== Test: Stack Growth ===\n");
+    printf(1, "Starting recursion test...\n");
 
-    deep_recursion(1);  // 初始递归调用，测试栈增长
+    recursion(1);  // 初始递归调用，测试栈增长
 
-    printf(1, "Deep recursion test completed.\n");
+    printf(1, "Stack recursion test completed.\n");
 }
+```
 
-// 强制堆增长以接近栈区域
-void force_stack_heap_collision() {
-    // 通过增加堆的大小来接近栈区域
-    sbrk((KERNBASE - (uint)sbrk(0)) / 2);  // 增加到接近栈的区域
-
-    char buffer[1024];  // 在栈上分配空间
-    printf(1, "Allocated stack buffer at: 0x%x\n", buffer);
-}
-
+## 测试堆与栈的冲突
+在测试栈增长的基础上，添加test_stack_heap_collision函数，通过分配大量堆内存，测试堆与栈的冲突。
+```
 // 测试堆与栈的冲突
 void test_stack_heap_collision() {
-    printf(1, "\n=== Test 5: Stack-Heap Collision ===\n");
+    printf(1, "\n=== Test: Stack-Heap Collision ===\n");
+    printf(1, "Starting stack-heap collision test...\n");
+    printf(1, "Allocating 222MB of memory on the heap...\n");
+    int * p = (int *)malloc(222*1024*1024 - 512*1024);
+    *p = 1;
 
-    force_stack_heap_collision();  // 强制堆增长，接近栈
-
-    printf(1, "Test completed.\n");
-}
-
-int main() {
-    // 执行所有测试
-    test_stack_position();         // 测试栈位置
-    test_heap_stack_separation();  // 测试堆与栈的分离
-    test_stack_growth();           // 测试栈增长
-    test_deep_stack_growth();      // 测试深度递归栈增长
-    test_stack_heap_collision();   // 测试堆与栈的冲突
-
-    exit();
+    printf(1, "Making recursions .\n");
+    recursion(1);  // 初始递归调用，测试栈增长
+    printf(1, "Stack recursion test completed.\n");
 }
 ```
 
+## 运行测试程序
+
+编译并运行测试程序:
+```
+$ make qemu-gdb
+```
 在`Makefile`中添加编译`testcase.c`的命令:
 ```
+UPROGS=\
   _testcase\
 ```
 
-# 进行实验
 
-运行`make qemu`启动QEMU，并在QEMU中运行测试程序:
+运行`make qemu`启动QEMU，并在QEMU中运行测试程序,观察输出，得出结论:
 ```
 $ testcase
 ```
-一共有五个测试，具体输出如下:
 
-## 测试1 测试栈位置
-输出当前栈指针，堆结束地址，判断栈是否位于堆之上，可以发现栈指针位于堆之上
-```
-=== Test 1: Stack Position ===
-Current stack pointer: 0x7FFFEFB0
-Heap end: 0x2000
-Test passed: Stack is above heap.
-```
+## 实验结果
 
-## 测试2 测试堆和栈分离
-输出堆范围，栈指针，判断栈是否位于堆之上，可以发现栈指针位于堆之上
-```
-=== Test 2: Heap and Stack Separation ===
-Heap range: 0x2000 - 0xC000
-Stack pointer: 0x7FFFEFA0
-Test passed: Stack is above heap after sbrk.
-```
+### 测试栈的增长
 
-## 测试3 测试栈增长
-递归调用，输出递归深度和栈地址，可以发现栈地址逐渐增长
 ```
-=== Test 3: Stack Growth ===
-Testing stack growth with recursion...
-Recursion depth: 1, buffer address: 0x7FFFE3A0
-Recursion depth: 2, buffer address: 0x7FFFE7A0
-Recursion depth: 3, buffer address: 0x7FFFEBA0
-```
-## 测试4 深度递归调用以测试更大规模的栈增长
-递归调用，输出递归深度和栈地址，可以发现栈地址逐渐增长，并且当深度达到一定值时，会触发页错误，创建新的页，由此不断重复，直到到达设定的递归深度
-```
-=== Test 4: Deep Stack Growth ===
-Starting deep recursion test...
-Recursion depth: 1, buffer address: 0x7FFFBFA0
-Recursion depth: 2, buffer address: 0x7FFFCFA0
-Recursion depth: 3, buffer address: 0x7FFFDFA0
+=== Test: Stack Growth ===
+Starting recursion test...
+page error 7fffdf90 stack pos : 7fffe000
+create a new page 7fffd000
+page error 7fffcf90 stack pos : 7fffd000
+create a new page 7fffc000
+page error 7fffbf90 stack pos : 7fffc000
+create a new page 7fffb000
+Recursion depth: 1, stack address: 0x7FFFBF90,buffer address: 0x7FFFBF90
+Recursion depth: 2, stack address: 0x7FFFBF90,buffer address: 0x7FFFCF90
+Recursion depth: 3, stack address: 0x7FFFBF90,buffer address: 0x7FFFDF90
+page error 7fffaf70 stack pos : 7fffb000
 ...
-Recursion depth: 48, buffer address: 0x7FFD0DC0
-page error 7ffcbda0 stack pos : 7ffcc000
-create a new page 7ffcb000
-Recursion depth: 49, buffer address: 0x7FFCBDA0
-Recursion depth: 50, buffer address: 0x7FFCCDA
-ecursion depth: 51, buffer address: 0x7FFCDDA0
-page error 7ffcad80 stack pos : 7ffcb000
-create a new page 7ffca000
-page error 7ffc9d80 stack pos : 7ffca000
-create a new page 7ffc9000
-page error 7ffc8d80 stack pos : 7ffc9000
-create a new page 7ffc8000
-Recursion depth: 52, buffer address: 0x7FFC8D80
-...
-...
-page error 7ff37760 stack pos : 7ff38000
-create a new page 7ff37000
-page error 7ff36760 stack pos : 7ff37000
-create a new page 7ff36000
-page error 7ff35760 stack pos : 7ff36000
-create a new page 7ff35000
-Recursion depth: 199, buffer address: 0x7FF35760
-Recursion depth: 200, buffer address: 0x7FF36760
+page error 7ff9ab70 stack pos : 7ff9b000
+create a new page 7ff9a000
+page error 7ff99b70 stack pos : 7ff9a000
+create a new page 7ff99000
+page error 7ff98b70 stack pos : 7ff99000
+create a new page 7ff98000
+Recursion depth: 100, stack address: 0x7FF98B70,buffer address: 0x7FF98B70
+Stack recursion test completed
 ```
-## 测试5 测试堆与栈的冲突
-强制堆增长，接近栈区域，输出栈地址，可以发现栈地址逐渐增长，直到触发页错误，创建新的页，从而实现堆与栈的冲突
+从输出中可以看出，随着递归深度的增加，由于栈空间不足，系统会不断分配新的页，并且对于每次递归，系统都会输出栈帧地址和站上的数据，我们可以看到栈地址逐渐从高地址向低地址移动，说明我们的栈是向下增长的。
+
+### 测试堆与栈的冲突
+
 ```
-=== Test 5: Stack-Heap Collision ===
+=== Test: Stack-Heap Collision ===
+
+=== Test: Stack-Heap Collision ===
+Starting stack-heap collision test...
+Allocating 222MB of memory on the heap...
+Making recursions .
+page error 7fffdf90 stack pos : 7fffe000
+create a new page 7fffd000
+page error 7fffcf90 stack pos : 7fffd000
+create a new page 7fffc000
+page error 7fffbf90 stack pos : 7fffc000
+create a new page 7fffb000
+Recursion depth: 1, stack address: 0x7FFFBF80
+Recursion depth: 2, stack address: 0x7FFFBF80
+Recursion depth: 3, stack address: 0x7FFFBF80
+page error 7fffaf70 stack pos : 7fffb000
+create a new page 7fffa000
+page error 7fff9f70 stack pos : 7fffa000
+create a new page 7fff9000
+...
+page error 7ffe2e70 stack pos : 7ffe3000
+create a new page 7ffe2000
+page error 7ffe1e70 stack pos : 7ffe2000
+create a new page 7ffe1000
+page error 7ffe0e70 stack pos : 7ffe1000
+create a new page 7ffe0000
+Recursion depth: 28, stack address: 0x7FFE0E60
+Recursion depth: 29, stack address: 0x7FFE0E60
+Recursion depth: 30, stack address: 0x7FFE0E60
+page error 7ffdfe50 stack pos : 7ffe0000
 allocuvm out of memory
-Allocated stack buffer at: 0x7FFFEBA0
-Test completed.
+The stack has grown into the heap space.
+create a new page fffff000
+stack is allocated in wrong place, End the process!
 ```
+从输出中可以看出，当递归深度达到28时，此时栈已经进入堆空间。由于我们的程序在出现这种情况时选择重新分配栈空间，而在此时，由于无空间可分，最终栈被分入错误的地址，导致程序崩溃。
