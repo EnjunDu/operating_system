@@ -68,7 +68,8 @@ make: *** [Makefile:225: qemu] Error 1
 
 经查询,其原因通常与 QEMU 的 GTK 版本有关,这可能是由于缺少 GTK 库或没有正确配置显示环境引起的。在此处我们选择采用VNC后端启动QEMU,通过修改其中的`QEMUOPTS`变量如下,修改启动方式:
 
-```QEMUOPTS = -drive file=fs.img,index=1,media=disk,format=raw -drive file=xv6.img,index=0,media=disk,format=raw -smp $(CPUS) -m 512 -nographic $(QEMUEXTRA)
+```
+QEMUOPTS = -drive file=fs.img,index=1,media=disk,format=raw -drive file=xv6.img,index=0,media=disk,format=raw -smp $(CPUS) -m 512 -nographic $(QEMUEXTRA)
 ```
 
 命令行中输入`make qemu`启动qemu,进入qemu界面:
