@@ -1,3 +1,7 @@
+# 项目链接
+
+[项目仓库](https://github.com/ckt1i/xv6-public/tree/lab5-ckti)
+
 # 配置环境
 
 ## 实验环境
@@ -15,6 +19,7 @@
 输入`sudo apt-get install -y build-essential git gcc-multilib `配置gcc
 
 输入`objdump -i`检查是否支持64位:
+
 ```
 user@Lab:~$ objdump -i
 BFD header file version (GNU Binutils for Ubuntu) 2.38
@@ -22,6 +27,7 @@ elf64-x86-64
 ```
 
 输入`gcc -m32 -print-libgcc-file-name `查看32位gcc库文件路径:
+
 ```
 user:~$ gcc -m32 -print-libgcc-file-name 
 /usr/lib/gcc/x86_64-linux-gnu/11/32/libgcc.a
@@ -34,6 +40,7 @@ user:~$ gcc -m32 -print-libgcc-file-name
 输入`sudo apt-get install qemu-system`安装qemu
 
 输入`qemu-system-i386 --version`查看qemu版本:
+
 ```
 user@Lab:~$ qemu-system-i386 --version
 QEMU emulator version 6.2.0 (Debian 1:6.2+dfsg-2ubuntu6.22)
@@ -45,7 +52,8 @@ Copyright (c) 2003-2021 Fabrice Bellard and the QEMU Project developers
 输入`git clone https://github.com/mit-pdos/xv6-public.git`下载xv6系统
 
 文件最后出现输出,说明操作系统镜像文件已准备好:
-``` 
+
+```
 +0 records in
 +0 records out
 512 bytes (512 B) copied, 0.000543844 s, 938 kB/s
@@ -104,33 +112,43 @@ $
 以下是与xv6内存布局和管理相关的文件及其简要功能描述:
 
 ### 1. `vm.c`
+
 负责虚拟内存管理,包括设置内核页表、分配和释放用户内存、复制进程内存等。关键函数包括 `setupkvm()`、`allocuvm()`、`deallocuvm()` 和 `copyuvm()`。
 
 ### 2. `proc.c`
+
 管理进程状态,包括创建新进程、扩展内存(`growproc()`)、执行新程序(`exec()`)等,使用 `copyuvm()` 复制父进程的内存布局。
 
 ### 3. `trap.c`
+
 处理异常和中断,包括页面错误(Page Fault)。在 `trap()` 函数中处理用户栈不足时的错误,调用 `allocuvm()` 分配新页面。
 
 ### 4. `exec.c`
+
 加载可执行文件和初始化进程的内存布局,使用 `exec()` 加载 ELF 文件,分配代码段、数据段和用户栈。
 
 ### 5. `syscall.c`
+
 处理系统调用,调用相应的内存管理功能,如 `fork`、`exec`、`wait` 等,负责在用户空间和内核空间之间切换。
 
 ### 6. `memlayout.h`
+
 定义内存布局的常量,包括内核空间和用户空间的起始和结束地址,如 `KERNBASE`、`PHYSTOP` 和 `USERTOP`。
 
 ### 7. `mmu.h`
+
 定义分页机制的宏和结构,描述页表项格式、页大小等,如 `PGSIZE` 和各种页表项标志(PTE)。
 
 ### 8. `kalloc.c`
+
 实现物理内存分配,提供 `kalloc()` 和 `kfree()` 函数,负责从物理内存中分配和释放页面。
 
 ### 9. `trapasm.S`
+
 汇编代码,处理从用户态进入内核态时的上下文切换,设置陷阱帧并跳转到 `trap()` 函数。
 
 ### 10. `kernel.ld`
+
 链接脚本,定义内核的加载地址及各部分的内存布局,确保内核和用户进程的内存正确映射。
 
 这些文件和函数共同实现了xv6的内存管理和布局,确保系统在运行时能够有效地分配和使用内存。
@@ -148,10 +166,12 @@ $
 ## 调整用户地址空间布局
 
 核心文件是 `memlayout.h`,它定义了内核和用户内存空间的布局。在 `memlayout.h` 中,`KERNBASE` 定义了用户地址空间的上限:
+
 ```
 // Key addresses for address space layout (see kmap in vm.c for layout)
 #define KERNBASE 0x80000000         // First kernel virtual address
 ```
+
 在这个空间内修改栈的位置。
 
 ## 修改`exec.c`中的栈分配逻辑
@@ -204,6 +224,7 @@ if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz, curproc->stackbase)) == 0)
 ```
 
 在`vm.c`中修改 `copyuvm` 函数,以确保在 fork 时正确地拷贝栈。:
+
 ```
 copyuvm(pde_t *pgdir, uint sz, uint stackbase)
 {
@@ -233,6 +254,7 @@ copyuvm(pde_t *pgdir, uint sz, uint stackbase)
 ## 实现栈增长后的处理
 
 在`trap.c` 中,中处理页面错误,检测是否是栈溢出,并分配新的栈页:
+
 ```
 // 新增触发页错误(Page Fault)的情况
 case T_PGFLT:
@@ -300,8 +322,10 @@ int main(int argc, char *argv[]) {
 ```
 
 ### 测试栈的增长以及缺页分配
+
 编写如下程序:
 其中,`get_stack_pointer`用于获取栈指针,`recursion`函数用于递归调用,`test_stack_growth`函数用于测试栈的增长。对于每次递归调用,输出当前栈指针。
+
 ```
 // 获取当前栈指针
 uint get_stack_pointer() {
@@ -335,7 +359,9 @@ void test_stack_growth() {
 ```
 
 ## 测试堆与栈的冲突
+
 在测试栈增长的基础上,添加test_stack_heap_collision函数,通过分配大量堆内存,测试堆与栈的冲突。
+
 ```
 // 测试堆与栈的冲突
 void test_stack_heap_collision() {
@@ -354,17 +380,20 @@ void test_stack_heap_collision() {
 ## 运行测试程序
 
 编译并运行测试程序:
+
 ```
 $ make qemu-gdb
 ```
+
 在`Makefile`中添加编译`testcase.c`的命令:
+
 ```
 UPROGS=\
   _testcase\
 ```
 
-
 运行`make qemu`启动QEMU,并在QEMU中运行测试程序,观察输出,得出结论:
+
 ```
 $ testcase
 ```
@@ -396,6 +425,7 @@ create a new page 7ff98000
 Recursion depth: 100, stack address: 0x7FF98B70,buffer address: 0x7FF98B70
 Stack recursion test completed
 ```
+
 从输出中可以看出,随着递归深度的增加,由于栈空间不足,系统会不断分配新的页,并且对于每次递归,系统都会输出栈帧地址和站上的数据,我们可以看到栈地址逐渐从高地址向低地址移动,说明我们的栈是向下增长的。
 
 ### 测试堆与栈的冲突
@@ -435,4 +465,5 @@ The stack has grown into the heap space.
 create a new page fffff000
 stack is allocated in wrong place, End the process!
 ```
+
 从输出中可以看出,当递归深度达到28时,此时栈已经进入堆空间。由于我们的程序在出现这种情况时选择重新分配栈空间,而在此时,由于无空间可分,最终栈被分入错误的地址,导致程序崩溃。
